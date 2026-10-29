@@ -55,7 +55,7 @@ pre{white-space:pre-wrap;font:11px var(--mono);color:var(--dim);max-height:160px
     <div style="display:flex;gap:8px"><button class="ghost" id="updGo" style="background:var(--acc);color:#1a1205;font-weight:650;border:0" hidden>Встановити оновлення</button><button class="ghost" id="updClose">Закрити</button></div>
   </div>
 
-  <div id="drop"><b>Кинь сюди .fcpxml</b> або клікни, щоб вибрати<br><small>(для .fcpxmld — файл Info.fcpxml всередині пакета)</small><input id="fi" type="file" accept=".fcpxml,.xml" class="hid"></div>
+  <div id="drop"><b>Кинь сюди .fcpxml або .zip</b> (fcpxml + папка з треками) або клікни, щоб вибрати<br><small>для .fcpxmld — файл Info.fcpxml всередині пакета</small><input id="fi" type="file" accept=".fcpxml,.xml,.zip" class="hid"></div>
   <div id="err" class="err" style="margin-top:10px"></div>
 
   <div id="main" class="grid hid">
@@ -133,7 +133,16 @@ pre{white-space:pre-wrap;font:11px var(--mono);color:var(--dim);max-height:160px
   function pathmap() { return {}; }
 
   async function load(file) {
-    $('#err').textContent = ''; XML = await file.text(); dirsBuilt = false; for (const k in TYPES) delete TYPES[k]; $('#res').classList.add('hid'); $('#log').classList.add('hid'); $('#miss').classList.add('hid');
+    $('#err').textContent = '';
+    if (/\.zip$/i.test(file.name)) {
+      drop.innerHTML = '<b>Розпаковую архів…</b>'; drop.appendChild(fi);
+      try {
+        const r = await fetch('/api/archive', { method: 'POST', body: file });
+        const j = await r.json(); if (!r.ok) throw new Error(j.error || r.status);
+        XML = j.xml; libRender(j.libs);
+      } catch (e) { $('#err').textContent = 'Помилка: ' + e.message; drop.innerHTML = '<b>Кинь сюди .fcpxml або .zip</b>'; drop.appendChild(fi); return; }
+    } else XML = await file.text();
+    { dirsBuilt = false; for (const k in TYPES) delete TYPES[k]; $('#res').classList.add('hid'); $('#log').classList.add('hid'); $('#miss').classList.add('hid'); }
     await refresh();
   }
   async function refresh() {
@@ -206,7 +215,7 @@ pre{white-space:pre-wrap;font:11px var(--mono);color:var(--dim);max-height:160px
   };
   const libRender = (s) => {
     $('#libList').innerHTML = (s.dirs || []).map(d => `<div style="display:flex;gap:8px;align-items:center;font:12px var(--mono);padding:4px 0;border-bottom:1px solid #202226"><span style="flex:1;word-break:break-all">${esc(d)}</span><button class="ghost libDel" data-d="${esc(d)}" style="padding:2px 8px">×</button></div>`).join('') || '<div style="font-size:12px;color:var(--dim)">Ще нічого не додано</div>';
-    $('#libInfo').textContent = s.dirs && s.dirs.length ? `у бібліотеці ${s.count} аудіофайлів` : '';
+    $('#libInfo').textContent = (s.dirs && s.dirs.length) || s.archive ? `у бібліотеці ${s.count} аудіофайлів` + (s.archive ? ' (разом з архівом)' : '') : '';
     document.querySelectorAll('.libDel').forEach(b => b.onclick = async () => { libRender(await api('/api/libs', { remove: b.dataset.d })); refresh(); });
   };
   api('/api/libs').then(libRender).catch(() => {});

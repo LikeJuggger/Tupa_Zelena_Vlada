@@ -812,9 +812,12 @@ def nkey(s):
     return unicodedata.normalize('NFC', s).lower()
 
 
+ARCH = {'dir': None}
+
+
 def index_libs(force=False):
-    """індекс усіх аудіофайлів у папках бібліотеки: назва → шлях"""
-    dirs = load_cfg().get('libs', [])
+    """індекс усіх аудіофайлів у папках бібліотеки (+ розпакований архів): назва → шлях"""
+    dirs = load_cfg().get('libs', []) + ([ARCH['dir']] if ARCH['dir'] else [])
     if not force and LIB['dirs'] == dirs and time.time() - LIB['stamp'] < 300:
         return
     name, stem, n = {}, {}, 0
@@ -851,7 +854,49 @@ def make_resolver(pmap):
 
 def libs_state():
     index_libs()
-    return {'dirs': LIB['dirs'] or [], 'count': LIB['count']}
+    return {'dirs': load_cfg().get('libs', []), 'count': LIB['count'], 'archive': bool(ARCH['dir'])}
+
+
+def unpack_archive(src_zip):
+    """розпакувати zip (fcpxml + папка з треками) у тимчасову папку; повернути текст fcpxml"""
+    import zipfile
+    if ARCH['dir']:
+        shutil.rmtree(ARCH['dir'], ignore_errors=True)
+    dst = tempfile.mkdtemp(prefix='tzv_zip_')
+    ARCH['dir'] = dst
+    with zipfile.ZipFile(src_zip) as z:
+        for info in z.infolist():
+            name = info.filename
+            if not (info.flag_bits & 0x800):
+                try:
+                    name = name.encode('cp437').decode('utf-8')
+                except Exception:
+                    pass
+            name = unicodedata.normalize('NFC', name).replace('\\', '/')
+            if name.startswith('__MACOSX/') or '/._' in '/' + name:
+                continue
+            parts = [x for x in name.split('/') if x not in ('', '.', '..')]
+            if not parts:
+                continue
+            out = os.path.join(dst, *parts)
+            if info.is_dir():
+                os.makedirs(out, exist_ok=True)
+                continue
+            os.makedirs(os.path.dirname(out), exist_ok=True)
+            with z.open(info) as fi, open(out, 'wb') as fo:
+                shutil.copyfileobj(fi, fo, 1 << 20)
+    found = []
+    for root, _, files in os.walk(dst):
+        for fn in files:
+            if fn.lower().endswith('.fcpxml'):
+                found.append(os.path.join(root, fn))
+    if not found:
+        raise ValueError('В архіві немає .fcpxml')
+    found.sort(key=lambda p: (p.count(os.sep), p))
+    with open(found[0], encoding='utf8') as f:
+        text = f.read()
+    index_libs(force=True)
+    return text, os.path.basename(found[0]) if os.path.basename(found[0]) != 'Info.fcpxml' else os.path.basename(os.path.dirname(found[0]))
 
 
 def job_runner(payload):
@@ -910,6 +955,26 @@ class H(BaseHTTPRequestHandler):
 
     def do_POST(self):
         n = int(self.headers.get('Content-Length', 0))
+        if self.path == '/api/archive':
+            tmpzip = os.path.join(tempfile.gettempdir(), 'tzv_upload_%d.zip' % os.getpid())
+            try:
+                with open(tmpzip, 'wb') as fo:
+                    left = n
+                    while left > 0:
+                        b = self.rfile.read(min(left, 1 << 20))
+                        if not b:
+                            break
+                        fo.write(b); left -= len(b)
+                text, name = unpack_archive(tmpzip)
+                return self._send(200, json.dumps({'xml': text, 'name': name, 'libs': libs_state()}))
+            except Exception as e:
+                applog('archive: %s' % traceback.format_exc())
+                return self._send(400, json.dumps({'error': 'Архів: %s' % e}))
+            finally:
+                try:
+                    os.remove(tmpzip)
+                except Exception:
+                    pass
         payload = json.loads(self.rfile.read(n).decode('utf8'))
         try:
             if self.path == '/api/parse':
