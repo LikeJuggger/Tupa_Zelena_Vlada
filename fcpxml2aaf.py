@@ -249,24 +249,26 @@ def fmt_tc(sec, fps):
 
 SFX_WORDS = ('swish', 'swoosh', 'whoosh', 'woosh', 'gleam', 'hit', 'boom', 'riser', 'impact', 'swipe', 'clang',
              'reverse', 'sweep', 'braam', 'stinger', 'sfx', 'fx', 'transition', 'click', 'pop', 'glitch')
-TYPE_ORDER = {'voice': 0, 'music': 1, 'sfx': 2}
-TYPE_NAME = {'voice': 'Голос', 'music': 'Музика', 'sfx': 'Шуми'}
+TYPE_ORDER = {'music': 0, 'sfx': 1}
+TYPE_NAME = {'music': 'Music', 'sfx': 'SFX'}
+# бібліотечна музика: UPM_…, або каталожний код на початку (XCD737_01, XEH013_06, ATN074_01, LQC32_67…)
+LIB_MUSIC_RE = re.compile(r'(?:^|_)UPM_|^[A-Z]{2,6}\d{2,4}[A-Z]?_\d{1,3}(?:\b|_)', re.I)
 
 
 def classify(c):
-    """ролям і назвам не віримо: головне — довжина вихідного файлу і чи це звук із відео"""
+    """два типи: music / sfx. Бібліотечні треки — завжди музика, хоч би які короткі; далі — довжина файлу"""
     a = c['asset']
-    if a.get('hasVideo'):
-        return 'voice'
-    d = a['duration']
-    if d >= 45:
+    n = a['name'] or ''
+    if LIB_MUSIC_RE.search(n):
         return 'music'
-    if d <= 15:
+    if a.get('hasVideo'):
         return 'sfx'
-    n = (a['name'] or '').lower()
-    if any(w in n for w in SFX_WORDS):
+    d = a['duration']
+    if d >= 30:
+        return 'music'
+    if any(w in n.lower() for w in SFX_WORDS):
         return 'sfx'
-    return 'music' if d >= 30 else 'sfx'
+    return 'sfx'
 
 
 def build_tracks(clips, layout='min', types=None):

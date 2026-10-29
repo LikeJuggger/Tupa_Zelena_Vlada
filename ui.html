@@ -68,7 +68,7 @@ pre{white-space:pre-wrap;font:11px var(--mono);color:var(--dim);max-height:160px
         <div class="sep"></div>
         <h2 style="margin-top:4px">Доріжки</h2>
         <label class="opt"><input type="radio" name="layout" value="min" checked><span>Мінімум доріжок<small>Кліпи щільно, без накладань — зазвичай 2–3 доріжки</small></span></label>
-        <label class="opt"><input type="radio" name="layout" value="tidy"><span>Навести порядочок!<small>Голос / Музика / Шуми окремо, кожне на мінімум доріжок. Тип кліпу можна змінити кліком у таблиці</small></span></label>
+        <label class="opt"><input type="radio" name="layout" value="tidy"><span>Навести порядочок!<small>Music і SFX окремо, кожне на мінімум доріжок. Тип кліпу перемикається кліком у таблиці</small></span></label>
         <label class="opt"><input type="radio" name="layout" value="fcp"><span>Як в оригіналі<small>Доріжки як у монтажі, нічого не переставляю</small></span></label>
         <label class="opt"><input type="checkbox" id="gain"><span>Гучність як автоматизація<small>Рівень кліпу з FCP і його ключі гучності — лінією автоматизації. Без галочки — 0 dB</small></span></label>
         <div class="sep"></div>
@@ -111,7 +111,7 @@ pre{white-space:pre-wrap;font:11px var(--mono);color:var(--dim);max-height:160px
   const $ = (s) => document.querySelector(s);
   const esc = (s) => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const fmtDb = (d) => (d > 0 ? '+' : d < 0 ? '−' : '') + Math.abs(Math.round(d * 10) / 10) + ' dB';
-  const TYPES = {}; const TN = { voice: 'Голос', music: 'Музика', sfx: 'Шум' }; const NEXT = { voice: 'music', music: 'sfx', sfx: 'voice' };
+  const TYPES = {}; const TN = { music: 'Music', sfx: 'SFX' }; const NEXT = { music: 'sfx', sfx: 'music' };
   let XML = null, lastPath = null, dirsBuilt = false, timer = null;
   const drop = $('#drop'), fi = $('#fi');
   drop.onclick = () => fi.click();
