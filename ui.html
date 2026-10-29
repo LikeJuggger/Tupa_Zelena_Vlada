@@ -70,9 +70,12 @@ pre{white-space:pre-wrap;font:11px var(--mono);color:var(--dim);max-height:160px
         <label class="opt"><input type="radio" name="layout" value="min" checked><span>Мінімум доріжок<small>Кліпи щільно, без накладань — зазвичай 2–3 доріжки</small></span></label>
         <label class="opt"><input type="radio" name="layout" value="tidy"><span>Навести порядок<small>Голос / Музика / Шуми окремо, кожне на мінімум доріжок. Тип кліпу можна змінити кліком у таблиці</small></span></label>
         <label class="opt"><input type="radio" name="layout" value="fcp"><span>Як у FCP<small>Лейн = доріжка</small></span></label>
-        <label class="opt" style="opacity:.45;cursor:default"><input type="checkbox" disabled><span>Гучність як автоматизація<small>Скоро. Зараз усі кліпи на 0 dB</small></span></label>
+        <label class="opt"><input type="checkbox" id="gain"><span>Гучність як автоматизація<small>Рівень кліпу з FCP і його ключі гучності — лінією автоматизації. Без галочки — 0 dB</small></span></label>
         <div class="sep"></div>
-        <label class="opt"><input type="checkbox" id="cons" checked><span>Класти в AAF лише потрібні шматки аудіо<small>Якщо медіа є на цьому компʼютері, звук пакується всередину AAF. З галочкою — тільки ті частини треків, що стоять на таймлайні, плюс запас для підрізки. Без галочки — файли цілком.</small></span></label>
+        <h2 style="margin-top:4px">Медіа</h2>
+        <label class="opt"><input type="radio" name="media" value="folder" checked><span>Папка з WAV поруч з AAF<small>Як робить Nuendo. Папку тримай поруч з AAF</small></span></label>
+        <label class="opt"><input type="radio" name="media" value="embed"><span>Вшити в AAF<small>Один файл, але імпорт у Nuendo не перевірений</small></span></label>
+        <label class="opt"><input type="checkbox" id="cons" checked><span>Тільки потрібні шматки<small>Лише те, що стоїть на таймлайні, плюс запас для підрізки</small></span></label>
         <div class="row2">
           <div><label class="f">Запас, сек</label><input type="number" id="handles" value="2" min="0" step="0.5"></div>
           <div><label class="f">Sample rate</label><input type="number" id="sr" value="48000" step="100"></div>
@@ -122,6 +125,7 @@ pre{white-space:pre-wrap;font:11px var(--mono);color:var(--dim);max-height:160px
   function opts() {
     return { mode: document.querySelector('[name=mode]:checked').value, outside: $('#outside').checked,
       layout: document.querySelector('[name=layout]:checked').value, types: TYPES, consolidate: $('#cons').checked,
+      media: document.querySelector('[name=media]:checked').value, gain: $('#gain').checked ? 'auto' : 'none',
       handles: parseFloat($('#handles').value) || 0, sampleRate: parseInt($('#sr').value, 10) || 48000, outdir: $('#outdir').value };
   }
   function pathmap() { const m = {}; document.querySelectorAll('#pt input').forEach(i => m[i.dataset.from] = i.value); return m; }
@@ -144,8 +148,8 @@ pre{white-space:pre-wrap;font:11px var(--mono);color:var(--dim);max-height:160px
       const nclips = d.tracks.reduce((s, t) => s + t.clips.length, 0);
       $('#stats').innerHTML = `<span>Проєкт <b>${esc(d.name)}</b></span><span>fps <b>${d.fps}</b></span><span>Тривалість <b>${d.dur}</b></span><span>Кліпів <b>${nclips}</b>/${d.total}</span><span>Треків <b>${d.tracks.length}</b></span><span>Медіа знайдено <b>${d.nfiles - d.missing.length}</b>/${d.nfiles}</span>`;
       const w = d.warnings.slice();
-      if (d.missing.length) w.unshift(`${d.missing.length} з ${d.nfiles} файлів немає на цьому компʼютері. Кліпи все одно стануть на свої місця, але як посилання на оригінальні файли — у Nuendo перелінкуєш (Media → Find Missing Files). Якщо медіа лежить в іншій папці — вкажи її нижче.`);
-      if (!d.converter && d.missing.length < d.nfiles) w.push('Немає afconvert/ffmpeg — mp3 не вшиються, підуть посиланнями.');
+      if (d.missing.length) w.unshift(`${d.missing.length} з ${d.nfiles} файлів немає на цьому компʼютері — ці кліпи прийдуть офлайн, перелінкуєш у Nuendo. Якщо медіа в іншій папці — вкажи нижче.`);
+      if (!d.converter && d.missing.length < d.nfiles) w.push('Немає FFmpeg — mp3 не сконвертуються. Запусти INSTALL ще раз.');
       $('#warns').innerHTML = w.map(x => `<p class="warn" style="white-space:pre-line">⚠ ${esc(x)}</p>`).join('');
       $('#tb').innerHTML = d.tracks.flatMap(t => t.clips.map(c => `<tr class="${c.enabled ? '' : 'off'}"><td>${esc(t.name)}</td><td><span class="pill ty ty-${c.type}" data-id="${c.id}" data-t="${c.type}" title="Клік — змінити тип">${TN[c.type]}</span></td><td>${esc(c.name)}${t.w == 1 ? ' <span class="pill">ch' + c.ch + '</span>' : ''}</td><td class="m">${c.tc}</td><td class="m">${c.dur.toFixed(2)}s</td><td class="m">${fmtDb(c.db)}</td></tr>`)).join('');
       document.querySelectorAll('.ty').forEach(e => e.onclick = () => { TYPES[e.dataset.id] = NEXT[e.dataset.t]; refresh(); });
@@ -167,7 +171,7 @@ pre{white-space:pre-wrap;font:11px var(--mono);color:var(--dim);max-height:160px
         if (logTxt) { $('#log').textContent = logTxt; $('#log').classList.remove('hid'); }
         if (s.error) { $('#err').textContent = 'Помилка: ' + s.error; return; }
         lastPath = s.result.path;
-        $('#resTxt').textContent = `Готово: ${s.result.tracks} треків, ${s.result.clips} кліпів` + (s.result.embedded ? `, вшито ${s.result.embedded} файлів` : '') + (s.result.linked ? `, посиланнями ${s.result.linked}` : '') + ` → ${s.result.path}`;
+        $('#resTxt').textContent = `Готово: ${s.result.tracks} треків, ${s.result.clips} кліпів` + (s.result.linked ? `, без медіа ${s.result.linked} файлів (офлайн)` : '') + ` → ${s.result.path}` + (s.result.media ? ` + папка ${s.result.media.split(/[\\/]/).pop()}` : '');
         $('#res').classList.remove('hid');
       }
     }, 400);

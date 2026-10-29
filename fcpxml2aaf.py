@@ -99,7 +99,7 @@ def parse_fcpxml(text):
     clips, vspans, stats = [], [], {'auto': 0, 'mc': 0}
 
     def vol(el):
-        db, fi, fo = 0.0, Fraction(0), Fraction(0)
+        db, fi, fo, kf = 0.0, Fraction(0), Fraction(0), []
         for c in el.findall('adjust-volume'):
             db += pdb(c.get('amount'))
             f1, f2 = c.find('.//fadeIn'), c.find('.//fadeOut')
@@ -107,9 +107,12 @@ def parse_fcpxml(text):
                 fi = ptime(f1.get('duration')) or 0
             if f2 is not None:
                 fo = ptime(f2.get('duration')) or 0
-            if c.find('.//keyframe') is not None:
+            for k in c.iter('keyframe'):
+                if k.get('time') is not None and k.get('value') is not None:
+                    kf.append((ptime(k.get('time')), pdb(k.get('value'))))
+            if kf:
                 stats['auto'] += 1
-        return db, fi, fo
+        return db, fi, fo, sorted(kf)
 
     def chan_parts(el, asset):
         acs = el.findall('audio-channel-source') if el is not None else []
@@ -141,7 +144,7 @@ def parse_fcpxml(text):
             return
         clips.append(dict(name=nm or asset['name'], asset=asset, time=lo, duration=hi - lo,
                           playStart=inpt + (lo - abs_), db=ctx['db'], enabled=ctx['enabled'],
-                          lane=ctx['lane'], fadeIn=ctx['fi'], fadeOut=ctx['fo'], parts=parts,
+                          lane=ctx['lane'], fadeIn=ctx['fi'], fadeOut=ctx['fo'], parts=parts, kf=ctx.get('kf') or [],
                           role=' '.join(r for r in roles if r)))
 
     def child_abs(ch, ctx):
@@ -172,11 +175,11 @@ def parse_fcpxml(text):
         conn = el.get('lane') is not None
         lane = ((ctx['lane'] + '.') if ctx['lane'] not in ('0', '') else '') + el.get('lane') if conn else (ctx['lane'] or '0')
         enabled = ctx['enabled'] and el.get('enabled') != '0'
-        db, fi, fo = vol(el)
+        db, fi, fo, kf = vol(el)
         lo = -INF if conn else ctx['lo']
         hi = INF if conn else ctx['hi']
         win_lo, win_hi = max(lo, abs_), min(hi, abs_ + dur)
-        my = dict(abs=abs_, pstart=start, lane=lane, enabled=enabled, db=ctx['db'] + db, fi=fi, fo=fo, lo=win_lo, hi=win_hi)
+        my = dict(abs=abs_, pstart=start, lane=lane, enabled=enabled, db=ctx['db'] + db, fi=fi, fo=fo, kf=kf, lo=win_lo, hi=win_hi)
         if n == 'asset-clip':
             a = assets.get(el.get('ref'))
             if a and a['hasVideo'] and enabled:
@@ -203,14 +206,14 @@ def parse_fcpxml(text):
                 visit(c, my)
 
     spine = seq.find('spine')
-    base = dict(abs=Fraction(0), pstart=Fraction(0), lane='0', enabled=True, db=0.0, fi=0, fo=0, lo=-INF, hi=INF)
+    base = dict(abs=Fraction(0), pstart=Fraction(0), lane='0', enabled=True, db=0.0, fi=0, fo=0, kf=[], lo=-INF, hi=INF)
     for c in (list(spine) if spine is not None else []):
         visit(c, base)
 
     for i, c in enumerate(clips):
         c['id'] = i
     if stats['auto']:
-        warnings.append('Автоматизація гучності (keyframes) у %d кліп(ах) не переноситься — береться базовий рівень.' % stats['auto'])
+        warnings.append('Ключі гучності є у %d кліп(ах) — переносяться з опцією «Гучність як автоматизація».' % stats['auto'])
     if stats['mc']:
         warnings.append('Пропущено мультикам-кліпів: %d.' % stats['mc'])
     return dict(name=name, fps=fps, seqDur=seq_dur, tcStart=tc_start, clips=clips, vspans=vspans, warnings=warnings)
@@ -462,76 +465,104 @@ def to_url(path):
     return 'file://' + quote(p, safe='/:')
 
 
-def link_offline(f, path, name, channels, length, sr, real=None):
-    """master mob з посиланням на зовнішній файл (офлайн, якщо файлу нема). Один слот = весь файл (стерео як стерео)."""
-    bits = 24
-    summary = None
+OP_COMBINER = ('6b46dd7a-132d-4856-ab21-8b751d8462ec', 'Audio Channel Combiner')
+OP_GAIN = ('9d2ea894-0968-11d3-8a38-0050040ef7d2', 'Audio Gain')
+OP_DISSOLVE = ('0c3bea41-fc05-11d2-8a29-0050040ef7d2', 'Avid Audio Dissolve')
+PARAM_AMP = ('e4962321-2267-11d3-8a4c-0050040ef7d2', 'Amplitude')
+INTERP_LINEAR = ('5b6c85a4-0ede-11d3-80a9-006008143e6f', 'LinearInterp')
+
+
+def register_defs(f):
+    """ті самі визначення, що пише Nuendo/Resolve"""
+    defs = {}
+    for key, (auid, name), n in (('comb', OP_COMBINER, 1), ('gain', OP_GAIN, 1), ('diss', OP_DISSOLVE, 2)):
+        od = f.create.OperationDef(auid, name, '')
+        f.dictionary.register_def(od)
+        od.media_kind = 'sound'
+        od['IsTimeWarp'].value = False
+        od['NumberInputs'].value = n
+        od['OperationCategory'].value = 'OperationCategory_Effect'
+        defs[key] = od
+    amp = f.create.ParameterDef(PARAM_AMP[0], PARAM_AMP[1], '', 'Rational')
+    f.dictionary.register_def(amp)
+    defs['gain'].parameters.append(amp)
+    defs['amp'] = amp
+    lin = f.create.InterpolationDef(INTERP_LINEAR[0], INTERP_LINEAR[1], '')
+    f.dictionary.register_def(lin)
+    defs['lin'] = lin
+    return defs
+
+
+def wav_summary(real, channels, sr, bits=24):
     if real:
         try:
             from aaf2.ama import get_wave_fmt
-            summary = get_wave_fmt(real)
+            s_ = get_wave_fmt(real)
+            if s_:
+                return s_
         except Exception:
-            summary = None
-    if not summary:
-        summary = (b'RIFF' + struct.pack('<I', 36) + b'WAVE' + b'fmt ' +
-                   struct.pack('<IHHIIHH', 16, 1, channels, sr, sr * channels * bits // 8, channels * bits // 8, bits))
+            pass
+    return (b'RIFF' + struct.pack('<I', 36) + b'WAVE' + b'fmt ' +
+            struct.pack('<IHHIIHH', 16, 1, channels, sr, sr * channels * bits // 8, channels * bits // 8, bits))
+
+
+def file_mob(f, name, path, length, sr, real=None):
+    """SourceMob із посиланням на моно-WAV (як у Nuendo: один файл = один канал)"""
+    sm = f.create.SourceMob()
+    sm.name = name
+    sl = sm.create_timeline_slot(sr)
+    sc = f.create.SourceClip(media_kind='sound')
+    sc.length = length
+    sl.segment = sc
     d = f.create.WAVEDescriptor()
     d['SampleRate'].value = sr
-    d['Summary'].value = summary
+    d['Summary'].value = wav_summary(real, 1, sr)
     d['Length'].value = length
     d['ContainerFormat'].value = f.dictionary.lookup_containerdef('AAF')
     loc = f.create.NetworkLocator()
     loc['URLString'].value = to_url(path)
     d['Locator'].append(loc)
+    sm.descriptor = d
+    f.content.mobs.append(sm)
+    return sm
 
-    tape = f.create.SourceMob()
-    tape.name = name + ' <TAPE>'
-    ts = tape.create_sound_slot(edit_rate=sr)
-    ts.segment.length = length
-    tc = f.create.SourceClip(media_kind='sound')
-    tc.length = length
-    ts.segment.components.append(tc)
-    tape.descriptor = f.create.ImportDescriptor()
-    f.content.mobs.append(tape)
 
-    def chain(src, dst):
-        sl = list(src.slots)[0]
-        clip = src.create_source_clip(slot_id=sl.slot_id, media_kind='sound')
-        clip.length = length
-        ns = dst.create_empty_sequence_slot(edit_rate=sr, media_kind='sound')
-        ns.segment.components.append(clip)
-        ns['PhysicalTrackNumber'].value = 1
-        return ns.slot_id
-
-    smob = f.create.SourceMob()
-    smob.name = name
-    chain(tape, smob)
-    smob.descriptor = d
-    f.content.mobs.append(smob)
-    mm = f.create.MasterMob()
-    mm.name = name
-    sid = chain(smob, mm)
+def master_from_files(f, name, files, length, sr, real=True):
+    """files: [(channel, wav_path)] → MasterMob, {channel: slot_id}"""
+    mm = f.create.MasterMob(name)
     f.content.mobs.append(mm)
-    return mm, sid
+    ids = {}
+    for k, (ch, path) in enumerate(files):
+        sm = file_mob(f, '%s_A%02d' % (name, ch), path, length, sr, path if real else None)
+        ms = mm.create_timeline_slot(sr)
+        ms.segment = sm.create_source_clip(1, length=length, media_kind='sound')
+        ms['PhysicalTrackNumber'].value = k + 1
+        ids[ch] = ms.slot_id
+    return mm, ids
 
 
 def write_aaf(p, clips, out_path, opts, resolve, log, progress):
     sr = int(opts.get('sampleRate') or 48000)
+    media_mode = opts.get('media', 'folder')
+    gain_mode = opts.get('gain', 'none')
     tracks = build_tracks(clips, opts.get('layout', 'min'), opts.get('types'))
-    need, subsets = {}, {}
+    need, chans = {}, {}
     for c in clips:
         path = resolve(c['asset']['path'])
         need.setdefault(path, c['asset'])
         for part in c['parts']:
-            subsets.setdefault(path, set()).add(tuple(part))
+            chans.setdefault(path, set()).update(part)
     tmp = tempfile.mkdtemp(prefix='tzv_')
+    media_dir = os.path.splitext(out_path)[0] + '_Media'
+    if media_mode == 'folder':
+        os.makedirs(media_dir, exist_ok=True)
     try:
         prepared, linked = {}, {}
         for i, (path, a) in enumerate(need.items()):
-            progress('Готую аудіо %d/%d: %s' % (i + 1, len(need), os.path.basename(path)), i / max(1, len(need)) * 0.6)
+            progress('Готую аудіо %d/%d: %s' % (i + 1, len(need), os.path.basename(path)), i / max(1, len(need)) * 0.7)
             rp = real_path(path)
             if not rp:
-                linked[path] = (a, None, 'немає файлу')
+                linked[path] = (a, 'немає файлу')
                 continue
             info = wav_info(rp)
             src = rp
@@ -543,37 +574,49 @@ def write_aaf(p, clips, out_path, opts, resolve, log, progress):
                 if opts.get('consolidate', True):
                     ranges = merge_ranges([(float(c['playStart']), float(c['playStart'] + c['duration']))
                                            for c in clips if resolve(c['asset']['path']) == path], float(opts.get('handles', 2)))
-                prepared[path] = split_parts(src, tmp, 'a%d' % i, ranges, subsets[path])
+                subs = {(ch,) for ch in chans[path]}
+                outdir = media_dir if media_mode == 'folder' else tmp
+                base = re.sub(r'[\\/:*?"<>|]', '_', os.path.splitext(os.path.basename(path))[0])
+                chunks = split_parts(src, tmp, 'a%d' % i, ranges, subs)
+                res = []
+                for k, (a0, m0, files) in enumerate(chunks):
+                    nm = base + ('' if len(chunks) == 1 else '_%02d' % (k + 1))
+                    fl = []
+                    for (ch,), wav in sorted(files.items()):
+                        dst = os.path.join(outdir, '%s_A%02d.wav' % (nm, ch))
+                        shutil.move(wav, dst)
+                        fl.append((ch, dst))
+                    res.append((a0, m0, nm, fl))
+                prepared[path] = res
             except Exception as e:
-                linked[path] = (a, rp, str(e).split('\n')[0])
+                linked[path] = (a, str(e).split('\n')[0])
 
         if linked:
-            log('Посиланнями (без вшивання) — %d файл(ів):' % len(linked))
-            for path, (a, rp, why) in linked.items():
+            log('Без медіа (офлайн-кліпи, перелінкуєш у Nuendo) — %d файл(ів):' % len(linked))
+            for path, (a, why) in linked.items():
                 log('  • %s — %s' % (os.path.basename(path), why))
 
-        progress('Пишу AAF…', 0.65)
+        progress('Пишу AAF…', 0.75)
         with aaf2.open(out_path, 'w') as f:
-            # masters[(path, subset)] = [(start_sample, n_samples, mob, slot_id)]
-            masters = {}
-            for j, (path, chunks) in enumerate(prepared.items()):
-                progress('Вшиваю %d/%d: %s' % (j + 1, len(prepared), os.path.basename(path)), 0.65 + 0.3 * j / max(1, len(prepared)))
-                base = os.path.splitext(os.path.basename(path))[0]
-                for k, (a0, m0, files) in enumerate(chunks):
-                    for sub, wav in files.items():
-                        nm = base + ('' if len(chunks) == 1 else '.%d' % (k + 1))
-                        if len(subsets[path]) > 1:
-                            nm += ' ch' + '+'.join(map(str, sub))
+            D = register_defs(f)
+            masters = {}  # path → [(start, n, mm, {ch: slot})]
+            for j, (path, res) in enumerate(prepared.items()):
+                masters[path] = []
+                for a0, m0, nm, fl in res:
+                    if media_mode == 'folder':
+                        mm, ids = master_from_files(f, nm, fl, m0, sr)
+                    else:
                         mm = f.create.MasterMob(nm)
                         f.content.mobs.append(mm)
-                        sid = mm.import_audio_essence(wav, sr).slot_id
-                        masters.setdefault((path, sub), []).append((a0, m0, mm, sid))
-            for path, (a, rp, why) in linked.items():
-                base = os.path.splitext(os.path.basename(path))[0]
+                        ids = {ch: mm.import_audio_essence(w, sr).slot_id for ch, w in fl}
+                    masters[path].append((a0, m0, mm, ids))
+            for path, (a, why) in linked.items():
                 n = int(round(a['duration'] * sr))
-                mm, sid = link_offline(f, rp or path, base, max(1, a['channels'] * max(1, a['sources'])), n, sr, rp)
-                for sub in subsets[path]:
-                    masters[(path, sub)] = [(0, n, mm, sid)]
+                base = os.path.splitext(os.path.basename(path))[0]
+                wav = os.path.splitext(path)[0] + '.wav'   # Nuendo не бере посилання на mp3
+                nch = max(1, a['channels'] * max(1, a['sources']))
+                mm, ids = master_from_files(f, base, [(ch, wav) for ch in range(1, nch + 1)], n, sr, real=False)
+                masters[path] = [(0, n, mm, ids)]
 
             comp = f.create.CompositionMob(p['name'])
             comp.usage = 'Usage_TopLevel'
@@ -585,6 +628,14 @@ def write_aaf(p, clips, out_path, opts, resolve, log, progress):
             tot = max([c['time'] + c['duration'] for c in clips] + [p['seqDur']])
             tcs.segment.length = int(round(float(tot) * fpsi))
 
+            def transition(n, cut):
+                t = f.create.Transition('sound')
+                t.length = n
+                t['CutPoint'].value = cut
+                og = f.create.OperationGroup(D['diss'], n, media_kind='sound')
+                t['OperationGroup'].value = og
+                return t
+
             placed = 0
             for t in tracks:
                 slot = comp.create_sound_slot(edit_rate=sr)
@@ -594,41 +645,71 @@ def write_aaf(p, clips, out_path, opts, resolve, log, progress):
                 pos = 0
                 for u in t['units']:
                     c = u['c']
-                    key = (resolve(c['asset']['path']), tuple(u['part']))
-                    if key not in masters:
+                    path = resolve(c['asset']['path'])
+                    if path not in masters:
                         continue
                     st = int(round(float(c['time']) * sr))
                     ln = int(round(float(c['duration']) * sr))
                     ps = int(round(float(c['playStart']) * sr))
-                    seg_ = next((x for x in masters[key] if x[0] <= ps < x[0] + x[1]), None)
+                    seg_ = next((x for x in masters[path] if x[0] <= ps < x[0] + x[1]), None)
                     if seg_ is None:
                         continue
-                    a0, m0, mm, sid = seg_
+                    a0, m0, mm, ids = seg_
                     ps -= a0
-                    if st > pos:
-                        seq.components.append(f.create.Filler('sound', st - pos))
-                        pos = st
-                    elif st < pos:
+                    if st < pos:
                         cut = pos - st; st = pos; ps += cut; ln -= cut
-                        if ln <= 0:
-                            continue
                     ln = min(ln, m0 - ps)
                     if ln <= 0:
                         continue
-                    sc = mm.create_source_clip(sid, start=ps, length=ln)
-                    fi = int(round(float(c['fadeIn']) * sr)); fo = int(round(float(c['fadeOut']) * sr))
-                    if fi:
-                        sc['FadeInLength'].value = fi; sc['FadeInType'].value = 'FadeLinearAmp'
-                    if fo:
-                        sc['FadeOutLength'].value = fo; sc['FadeOutType'].value = 'FadeLinearAmp'
-                    seq.components.append(sc)
+                    sids = [ids[ch] for ch in u['part'] if ch in ids]
+                    if not sids:
+                        continue
+                    if len(sids) == 1:
+                        seg = mm.create_source_clip(sids[0], start=ps, length=ln)
+                    else:
+                        seg = f.create.OperationGroup(D['comb'], ln, media_kind='sound')
+                        for sid in sids:
+                            seg.segments.append(mm.create_source_clip(sid, start=ps, length=ln))
+                    if gain_mode == 'auto' and (abs(c['db']) > 1e-6 or c.get('kf')):
+                        g = f.create.OperationGroup(D['gain'], ln, media_kind='sound')
+                        g.segments.append(seg)
+                        vv = f.create.VaryingValue(D['amp'], D['lin'])
+                        pts = []
+                        dur = float(c['duration']) or 1.0
+                        for kt, kdb in (c.get('kf') or []):
+                            pts.append((min(1.0, max(0.0, (float(kt) - float(c['playStart'])) / dur)), kdb))
+                        if not pts:
+                            pts = [(0.0, c['db']), (1.0, c['db'])]
+                        seen = set()
+                        for tn, kdb in pts:
+                            if tn in seen:
+                                continue
+                            seen.add(tn)
+                            vv.add_keyframe(Fraction(tn).limit_denominator(10 ** 9), 10 ** (kdb / 20.0))
+                        g.parameters.append(vv)
+                        seg = g
+                    fi = min(int(round(float(c['fadeIn']) * sr)), ln // 2)
+                    fo = min(int(round(float(c['fadeOut']) * sr)), ln // 2)
+                    gap = st - pos
+                    if fi > 0:
+                        seq.components.append(f.create.Filler('sound', gap + fi))
+                        seq.components.append(transition(fi, 0))
+                    elif gap > 0:
+                        seq.components.append(f.create.Filler('sound', gap))
+                    seq.components.append(seg)
                     pos = st + ln
+                    if fo > 0:
+                        seq.components.append(transition(fo, fo))
+                        seq.components.append(f.create.Filler('sound', fo))
                     placed += 1
                 seq.length = pos
         progress('Готово', 1.0)
-        return dict(tracks=len(tracks), clips=placed, embedded=len(prepared), linked=len(linked))
+        return dict(tracks=len(tracks), clips=placed, embedded=len(prepared), linked=len(linked),
+                    media=media_dir if media_mode == 'folder' and prepared else None)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
+        if media_mode == 'folder' and os.path.isdir(media_dir) and not os.listdir(media_dir):
+            os.rmdir(media_dir)
 
 # ------------------------------------------------------------------ web UI
 STATE = {'job': None, 'ping': None}
@@ -834,7 +915,8 @@ def cli(argv):
         p = parse_fcpxml(f.read())
     clips = filter_clips(p, '--nodis' in argv, '--outside' in argv)
     lay = 'fcp' if '--fcp' in argv else ('tidy' if '--tidy' in argv else 'min')
-    r = write_aaf(p, clips, out, {'layout': lay}, lambda x: x, print,
+    r = write_aaf(p, clips, out, {'layout': lay, 'media': 'embed' if '--embed' in argv else 'folder',
+                                  'gain': 'auto' if '--gain' in argv else 'none'}, lambda x: x, print,
                   lambda m, v: print('[%3d%%] %s' % (v * 100, m)))
     print(json.dumps(r, ensure_ascii=False))
 
