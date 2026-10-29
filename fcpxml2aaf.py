@@ -705,6 +705,7 @@ def write_aaf(p, clips, out_path, opts, resolve, log, progress):
                 seq.length = pos
         progress('Готово', 1.0)
         return dict(tracks=len(tracks), clips=placed, embedded=len(prepared), linked=len(linked),
+                    missing=sorted(os.path.basename(x) for x in linked),
                     media=media_dir if media_mode == 'folder' and prepared else None)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

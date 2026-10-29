@@ -68,7 +68,7 @@ pre{white-space:pre-wrap;font:11px var(--mono);color:var(--dim);max-height:160px
         <div class="sep"></div>
         <h2 style="margin-top:4px">Доріжки</h2>
         <label class="opt"><input type="radio" name="layout" value="min" checked><span>Мінімум доріжок<small>Кліпи щільно, без накладань — зазвичай 2–3 доріжки</small></span></label>
-        <label class="opt"><input type="radio" name="layout" value="tidy"><span>Навести порядок<small>Голос / Музика / Шуми окремо, кожне на мінімум доріжок. Тип кліпу можна змінити кліком у таблиці</small></span></label>
+        <label class="opt"><input type="radio" name="layout" value="tidy"><span>Навести порядочок!<small>Голос / Музика / Шуми окремо, кожне на мінімум доріжок. Тип кліпу можна змінити кліком у таблиці</small></span></label>
         <label class="opt"><input type="radio" name="layout" value="fcp"><span>Як у FCP<small>Лейн = доріжка</small></span></label>
         <label class="opt"><input type="checkbox" id="gain"><span>Гучність як автоматизація<small>Рівень кліпу з FCP і його ключі гучності — лінією автоматизації. Без галочки — 0 dB</small></span></label>
         <div class="sep"></div>
@@ -87,6 +87,7 @@ pre{white-space:pre-wrap;font:11px var(--mono);color:var(--dim);max-height:160px
         <div class="bar"><i id="bar"></i></div>
         <div id="msg"></div>
         <div id="res" class="hid" style="margin-top:8px"><div class="ok" id="resTxt" style="font-size:12.5px;margin-bottom:8px"></div><button class="ghost" id="reveal">Показати файл</button></div>
+        <details id="miss" class="hid" style="margin-top:10px;font-size:12px"><summary style="cursor:pointer;color:var(--acc)"></summary><div id="missList" style="color:var(--dim);margin-top:6px;line-height:1.6;word-break:break-word"></div></details>
         <pre id="log" class="hid"></pre>
       </div>
     </div>
@@ -101,11 +102,6 @@ pre{white-space:pre-wrap;font:11px var(--mono);color:var(--dim);max-height:160px
         <div style="font-size:12px;color:var(--dim);margin-bottom:8px">Папки з музикою і звуками на цьому компʼютері. Прога сама знайде кожен трек за назвою, хоч би де він лежав усередині.</div>
         <div id="libList"></div>
         <div style="display:flex;gap:8px;align-items:center;margin-top:8px"><button class="ghost" id="libAdd">Додати папку…</button><span id="libInfo" style="font-size:12px;color:var(--dim)"></span></div>
-      </div>
-      <div class="card" style="margin-top:18px">
-        <h2>Шляхи до медіа (вручну)</h2>
-        <div style="font-size:12px;color:var(--dim);margin-bottom:8px">Якщо диск змонтований інакше або файли переїхали — поправ папку праворуч.</div>
-        <table class="paths"><thead><tr><th style="width:45%">З FCPXML</th><th>Де шукати</th></tr></thead><tbody id="pt"></tbody></table>
       </div>
     </div>
   </div>
@@ -134,20 +130,16 @@ pre{white-space:pre-wrap;font:11px var(--mono);color:var(--dim);max-height:160px
       media: document.querySelector('[name=media]:checked').value, gain: $('#gain').checked ? 'auto' : 'none',
       handles: parseFloat($('#handles').value) || 0, sampleRate: parseInt($('#sr').value, 10) || 48000, outdir: $('#outdir').value };
   }
-  function pathmap() { const m = {}; document.querySelectorAll('#pt input').forEach(i => m[i.dataset.from] = i.value); return m; }
+  function pathmap() { return {}; }
 
   async function load(file) {
-    $('#err').textContent = ''; XML = await file.text(); dirsBuilt = false; for (const k in TYPES) delete TYPES[k]; $('#res').classList.add('hid'); $('#log').classList.add('hid');
+    $('#err').textContent = ''; XML = await file.text(); dirsBuilt = false; for (const k in TYPES) delete TYPES[k]; $('#res').classList.add('hid'); $('#log').classList.add('hid'); $('#miss').classList.add('hid');
     await refresh();
   }
   async function refresh() {
     if (!XML) return;
     try {
       const d = await api('/api/parse', { xml: XML, opts: opts(), pathmap: pathmap() });
-      if (!dirsBuilt) {
-        $('#pt').innerHTML = Object.entries(d.dirs).map(([k, n]) => `<tr><td>${esc(k)} <span class="pill">${n}</span></td><td><input type="text" data-from="${esc(k)}" value="${esc(k)}"></td></tr>`).join('');
-        document.querySelectorAll('#pt input').forEach(i => i.onchange = refresh); dirsBuilt = true;
-      }
       $('#main').classList.remove('hid');
       drop.innerHTML = `<b>${esc(d.name)}</b> — ${d.total} аудіокліпів. Кинь інший файл, щоб замінити.`; drop.appendChild(fi);
       $('#rangeHint').textContent = d.range ? `Межі відео: ${d.range[0]} – ${d.range[1]}` : `Відео немає — межа = тривалість секвенції (${d.dur})`;
@@ -165,7 +157,7 @@ pre{white-space:pre-wrap;font:11px var(--mono);color:var(--dim);max-height:160px
   document.querySelectorAll('input[name=mode],input[name=layout],#outside').forEach(i => i.onchange = refresh);
 
   $('#go').onclick = async () => {
-    $('#go').disabled = true; $('#res').classList.add('hid'); $('#log').classList.add('hid'); $('#err').textContent = '';
+    $('#go').disabled = true; $('#res').classList.add('hid'); $('#log').classList.add('hid'); $('#miss').classList.add('hid'); $('#err').textContent = '';
     try { await api('/api/convert', { xml: XML, opts: opts(), pathmap: pathmap() }); } catch (e) { $('#err').textContent = e.message; $('#go').disabled = false; return; }
     clearInterval(timer);
     timer = setInterval(async () => {
@@ -173,11 +165,13 @@ pre{white-space:pre-wrap;font:11px var(--mono);color:var(--dim);max-height:160px
       $('#bar').style.width = Math.round((s.p || 0) * 100) + '%'; $('#msg').textContent = s.msg || '';
       if (s.done) {
         clearInterval(timer); $('#go').disabled = false;
-        const logTxt = (s.log || []).join('\n');
-        if (logTxt) { $('#log').textContent = logTxt; $('#log').classList.remove('hid'); }
-        if (s.error) { $('#err').textContent = 'Помилка: ' + s.error; return; }
+        if (s.error) { $('#err').textContent = 'Помилка: ' + s.error; $('#log').textContent = (s.log || []).join('\n'); $('#log').classList.remove('hid'); return; }
+        const ms = s.result.missing || [];
+        $('#miss').classList.toggle('hid', !ms.length);
+        $('#miss summary').textContent = `Не знайдено ${ms.length} файл(ів) — прийшли офлайн`;
+        $('#missList').innerHTML = ms.map(esc).join('<br>');
         lastPath = s.result.path;
-        $('#resTxt').textContent = `Готово: ${s.result.tracks} треків, ${s.result.clips} кліпів` + (s.result.linked ? `, без медіа ${s.result.linked} файлів (офлайн)` : '') + ` → ${s.result.path}` + (s.result.media ? ` + папка ${s.result.media.split(/[\\/]/).pop()}` : '');
+        $('#resTxt').textContent = `Готово: ${s.result.tracks} треків, ${s.result.clips} кліпів` + ` → ${s.result.path}` + (s.result.media ? ` + папка ${s.result.media.split(/[\\/]/).pop()}` : '');
         $('#res').classList.remove('hid');
       }
     }, 400);
