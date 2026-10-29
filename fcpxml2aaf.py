@@ -724,7 +724,7 @@ def default_outdir():
     return home
 
 
-def _pick_tk(initial):
+def _pick_tk(initial, title='Куди зберегти AAF'):
     import tkinter
     from tkinter import filedialog
     root = tkinter.Tk()
@@ -736,20 +736,20 @@ def _pick_tk(initial):
     except Exception:
         pass
     d = filedialog.askdirectory(parent=root, initialdir=initial if initial and os.path.isdir(initial) else None,
-                                title='Куди зберегти AAF', mustexist=True)
+                                title=title, mustexist=True)
     root.destroy()
     return os.path.normpath(d) if d else None
 
 
-def _pick_ps(initial):
+def _pick_ps(initial, title='Куди зберегти AAF'):
     ps = ('Add-Type -AssemblyName System.Windows.Forms;'
           '$f=New-Object System.Windows.Forms.Form -Property @{TopMost=$true;ShowInTaskbar=$false;Opacity=0;'
           'StartPosition="CenterScreen";Width=1;Height=1};$f.Show();$f.Activate();'
           '$d=New-Object System.Windows.Forms.FolderBrowserDialog;'
-          '$d.Description="Куди зберегти AAF";$d.SelectedPath=$env:PICK_INIT;'
+          '$d.Description=$env:PICK_TITLE;$d.SelectedPath=$env:PICK_INIT;'
           '$r=$d.ShowDialog($f);$f.Close();'
           'if($r -eq [System.Windows.Forms.DialogResult]::OK){[Console]::OutputEncoding=[Text.Encoding]::UTF8;[Console]::Out.Write($d.SelectedPath)}')
-    env = dict(os.environ, PICK_INIT=initial or '')
+    env = dict(os.environ, PICK_INIT=initial or '', PICK_TITLE=title)
     r = subprocess.run(['powershell', '-NoProfile', '-STA', '-ExecutionPolicy', 'Bypass', '-Command', ps],
                        stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env, **NOWIN)
     if r.returncode != 0:
@@ -757,17 +757,17 @@ def _pick_ps(initial):
     return r.stdout.decode('utf8', 'ignore').strip() or None
 
 
-def pick_dir(initial):
+def pick_dir(initial, title='Куди зберегти AAF'):
     if sys.platform == 'darwin':
         try:
-            r = subprocess.run(['osascript', '-e', 'POSIX path of (choose folder with prompt "Куди зберегти AAF")'],
+            r = subprocess.run(['osascript', '-e', 'POSIX path of (choose folder with prompt "%s")' % title],
                                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             return r.stdout.decode('utf8').strip() or None
         except Exception as e:
             applog('pickdir mac: %s' % e)
     for fn in (_pick_tk, _pick_ps) if os.name == 'nt' else (_pick_tk,):
         try:
-            return fn(initial)
+            return fn(initial, title)
         except Exception as e:
             applog('pickdir %s: %s' % (fn.__name__, e))
     return None
@@ -783,6 +783,73 @@ def watchdog():
             os._exit(0)
 
 
+AUDIO_EXT = ('.wav', '.wave', '.bwf', '.mp3', '.aif', '.aiff', '.aifc', '.m4a', '.flac', '.ogg', '.caf')
+LIB = {'dirs': None, 'name': {}, 'stem': {}, 'stamp': 0, 'count': 0}
+CFG = os.path.join(HERE, 'config.json')
+
+
+def load_cfg():
+    try:
+        with open(CFG, encoding='utf8') as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def save_cfg(c):
+    try:
+        with open(CFG, 'w', encoding='utf8') as f:
+            json.dump(c, f, ensure_ascii=False, indent=1)
+    except Exception as e:
+        applog('config: %s' % e)
+
+
+def nkey(s):
+    return unicodedata.normalize('NFC', s).lower()
+
+
+def index_libs(force=False):
+    """індекс усіх аудіофайлів у папках бібліотеки: назва → шлях"""
+    dirs = load_cfg().get('libs', [])
+    if not force and LIB['dirs'] == dirs and time.time() - LIB['stamp'] < 300:
+        return
+    name, stem, n = {}, {}, 0
+    for d in dirs:
+        for root, _, files in os.walk(d):
+            for fn in files:
+                ext = os.path.splitext(fn)[1].lower()
+                if ext not in AUDIO_EXT:
+                    continue
+                full = os.path.join(root, fn)
+                name.setdefault(nkey(fn), full)
+                stem.setdefault(nkey(os.path.splitext(fn)[0]), full)
+                n += 1
+    LIB.update(dirs=dirs, name=name, stem=stem, stamp=time.time(), count=n)
+
+
+def make_resolver(pmap):
+    """де взяти файл: 1) папка, виправлена вручну; 2) оригінальний шлях; 3) пошук за назвою в бібліотеці"""
+    index_libs()
+
+    def resolve(path):
+        d = path[:path.rfind('/') + 1]
+        to = pmap.get(d, d)
+        if to and not to.endswith('/') and not to.endswith('\\'):
+            to += '/'
+        cand = to + path[len(d):]
+        if real_path(cand):
+            return cand
+        b = path.rsplit('/', 1)[-1]
+        hit = LIB['name'].get(nkey(b)) or LIB['stem'].get(nkey(os.path.splitext(b)[0]))
+        return hit or cand
+    return resolve
+
+
+def libs_state():
+    index_libs()
+    return {'dirs': LIB['dirs'] or [], 'count': LIB['count']}
+
+
 def job_runner(payload):
     st = STATE['job']
     def log(m): st['log'].append(m)
@@ -791,13 +858,7 @@ def job_runner(payload):
         p = parse_fcpxml(payload['xml'])
         o = payload.get('opts', {})
         clips = filter_clips(p, o.get('mode') == 'nodis', bool(o.get('outside')))
-        pmap = payload.get('pathmap', {})
-        def resolve(path):
-            d = path[:path.rfind('/') + 1]
-            to = pmap.get(d, d)
-            if to and not to.endswith('/'):
-                to += '/'
-            return to + path[len(d):]
+        resolve = make_resolver(payload.get('pathmap', {}))
         outdir = os.path.expanduser(o.get('outdir') or default_outdir())
         os.makedirs(outdir, exist_ok=True)
         fn = re.sub(r'[\\/:*?"<>|]', '_', p['name']) + '.aaf'
@@ -836,6 +897,8 @@ class H(BaseHTTPRequestHandler):
         if self.path == '/api/ping':
             STATE['ping'] = time.time()
             return self._send(200, json.dumps({'outdir': default_outdir()}))
+        if self.path == '/api/libs':
+            return self._send(200, json.dumps(libs_state()))
         if self.path == '/api/progress':
             j = STATE['job'] or {}
             return self._send(200, json.dumps({k: j.get(k) for k in ('msg', 'p', 'done', 'error', 'result', 'log')}))
@@ -854,13 +917,9 @@ class H(BaseHTTPRequestHandler):
                 for c in p['clips']:
                     d = c['asset']['path'][:c['asset']['path'].rfind('/') + 1]
                     dirs[d] = dirs.get(d, 0) + 1
-                pmap = payload.get('pathmap', {})
+                resolve = make_resolver(payload.get('pathmap', {}))
                 def exists(path):
-                    d = path[:path.rfind('/') + 1]
-                    to = pmap.get(d, d)
-                    if to and not to.endswith('/'):
-                        to += '/'
-                    return real_path(to + path[len(d):]) is not None
+                    return real_path(resolve(path)) is not None
                 files = sorted({c['asset']['path'] for c in clips})
                 miss = [f for f in files if not exists(f)]
                 rng = None
@@ -868,7 +927,7 @@ class H(BaseHTTPRequestHandler):
                     rng = [fmt_tc(min(s[0] for s in p['vspans']), p['fps']), fmt_tc(max(s[1] for s in p['vspans']), p['fps'])]
                 return self._send(200, json.dumps(dict(
                     name=p['name'], fps=p['fps'], dur=fmt_tc(p['seqDur'], p['fps']), total=len(p['clips']),
-                    warnings=p['warnings'], dirs=dirs, range=rng, missing=miss, nfiles=len(files),
+                    warnings=p['warnings'], dirs=dirs, range=rng, missing=miss, nfiles=len(files), libs=libs_state(),
                     converter='afconvert' if AFCONVERT else ('ffmpeg' if FFMPEG else None),
                     tracks=[dict(name=t['name'], off=t['off'], w=t['w'], clips=[dict(
                         id=u['c']['id'], name=u['c']['name'], tc=fmt_tc(u['c']['time'], p['fps']),
@@ -888,6 +947,19 @@ class H(BaseHTTPRequestHandler):
                 if r.get('ok'):
                     threading.Thread(target=restart, daemon=True).start()
                 return
+            if self.path == '/api/libs':
+                c = load_cfg()
+                dirs = c.get('libs', [])
+                if payload.get('pick'):
+                    d = pick_dir(None, 'Папка з музикою / звуками')
+                    if d and d not in dirs:
+                        dirs.append(d)
+                if payload.get('remove') in dirs:
+                    dirs.remove(payload['remove'])
+                c['libs'] = dirs
+                save_cfg(c)
+                index_libs(force=True)
+                return self._send(200, json.dumps(libs_state()))
             if self.path == '/api/pickdir':
                 return self._send(200, json.dumps({'path': pick_dir(payload.get('initial'))}))
             if self.path == '/api/reveal':

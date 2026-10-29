@@ -97,7 +97,13 @@ pre{white-space:pre-wrap;font:11px var(--mono);color:var(--dim);max-height:160px
         <div class="tw"><table><thead><tr><th>Доріжка</th><th>Тип</th><th>Кліп</th><th>Старт</th><th>Довж.</th><th>dB у FCP</th></tr></thead><tbody id="tb"></tbody></table></div>
       </div>
       <div class="card" style="margin-top:18px">
-        <h2>Шляхи до медіа</h2>
+        <h2>Де шукати музику</h2>
+        <div style="font-size:12px;color:var(--dim);margin-bottom:8px">Папки з музикою і звуками на цьому компʼютері. Прога сама знайде кожен трек за назвою, хоч би де він лежав усередині.</div>
+        <div id="libList"></div>
+        <div style="display:flex;gap:8px;align-items:center;margin-top:8px"><button class="ghost" id="libAdd">Додати папку…</button><span id="libInfo" style="font-size:12px;color:var(--dim)"></span></div>
+      </div>
+      <div class="card" style="margin-top:18px">
+        <h2>Шляхи до медіа (вручну)</h2>
         <div style="font-size:12px;color:var(--dim);margin-bottom:8px">Якщо диск змонтований інакше або файли переїхали — поправ папку праворуч.</div>
         <table class="paths"><thead><tr><th style="width:45%">З FCPXML</th><th>Де шукати</th></tr></thead><tbody id="pt"></tbody></table>
       </div>
@@ -204,6 +210,13 @@ pre{white-space:pre-wrap;font:11px var(--mono);color:var(--dim);max-height:160px
       ut.innerHTML = '<span class="err">Не перезапустилось — відкрий програму ще раз з ярлика</span>';
     } catch (e) { ut.innerHTML = '<span class="err">' + esc(e.message) + '</span>'; }
   };
+  const libRender = (s) => {
+    $('#libList').innerHTML = (s.dirs || []).map(d => `<div style="display:flex;gap:8px;align-items:center;font:12px var(--mono);padding:4px 0;border-bottom:1px solid #202226"><span style="flex:1;word-break:break-all">${esc(d)}</span><button class="ghost libDel" data-d="${esc(d)}" style="padding:2px 8px">×</button></div>`).join('') || '<div style="font-size:12px;color:var(--dim)">Ще нічого не додано</div>';
+    $('#libInfo').textContent = s.dirs && s.dirs.length ? `у бібліотеці ${s.count} аудіофайлів` : '';
+    document.querySelectorAll('.libDel').forEach(b => b.onclick = async () => { libRender(await api('/api/libs', { remove: b.dataset.d })); refresh(); });
+  };
+  api('/api/libs').then(libRender).catch(() => {});
+  $('#libAdd').onclick = async () => { $('#libInfo').textContent = 'Шукаю…'; libRender(await api('/api/libs', { pick: true })); refresh(); };
   $('#reveal').onclick = () => lastPath && api('/api/reveal', { path: lastPath });
   $('#quit').onclick = async () => { try { await api('/api/quit', {}); } catch (e) {} document.body.innerHTML = '<div class="wrap"><h1>Вимкнено</h1><div class="sub">Можна закрити вкладку.</div></div>'; };
 })();
