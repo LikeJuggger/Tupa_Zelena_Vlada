@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tupa_Zelena_Vlada</title>
+<link rel="icon" href="/icon.png">
+<style>
+:root{--bg:#121315;--panel:#1a1c1f;--line:#2a2d31;--txt:#e6e4df;--dim:#8d8a84;--acc:#e8a33d;--ok:#7fbf7f;--bad:#d9695f;--mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace}
+*{box-sizing:border-box}html,body{margin:0;background:var(--bg);color:var(--txt);font:14px/1.45 -apple-system,"Segoe UI",system-ui,sans-serif}
+.wrap{max-width:1100px;margin:0 auto;padding:28px 20px 60px}
+.top{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+h1{font-size:18px;font-weight:600;margin:0 0 4px}h1 b{color:var(--acc);font-weight:600}
+.sub{color:var(--dim);font-size:12.5px;margin-bottom:22px}
+#drop{border:1.5px dashed var(--line);border-radius:10px;padding:34px;text-align:center;color:var(--dim);cursor:pointer;transition:.15s;background:var(--panel)}
+#drop.over{border-color:var(--acc);color:var(--txt)}#drop b{color:var(--txt)}
+.grid{display:grid;grid-template-columns:320px 1fr;gap:18px;margin-top:18px}
+@media(max-width:820px){.grid{grid-template-columns:1fr}}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px}
+.card h2{font-size:11px;text-transform:uppercase;letter-spacing:1.2px;color:var(--dim);margin:0 0 12px;font-weight:600}
+.opt{display:flex;gap:9px;align-items:flex-start;margin:0 0 10px;cursor:pointer}.opt input{margin-top:3px;accent-color:var(--acc)}
+.opt small{display:block;color:var(--dim);font-size:12px}
+.sep{height:1px;background:var(--line);margin:14px 0}
+label.f{display:block;font-size:12px;color:var(--dim);margin:8px 0 4px}
+input[type=text],input[type=number]{width:100%;background:#0e0f11;border:1px solid var(--line);color:var(--txt);border-radius:6px;padding:7px 9px;font:12px var(--mono)}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+button{background:var(--acc);color:#1a1205;border:0;border-radius:7px;padding:11px 16px;font-weight:650;font-size:14px;cursor:pointer;width:100%}
+button:disabled{opacity:.35;cursor:default}button.ghost{background:transparent;color:var(--txt);border:1px solid var(--line);font-weight:500;padding:7px 12px;font-size:12.5px;width:auto}
+.stats{display:flex;gap:18px;flex-wrap:wrap;font-size:12.5px;color:var(--dim);margin-bottom:12px}.stats b{color:var(--txt);font:600 13px var(--mono)}
+table{width:100%;border-collapse:collapse;font-size:12.5px}th{text-align:left;color:var(--dim);font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:.8px;padding:6px 8px;border-bottom:1px solid var(--line)}
+td{padding:5px 8px;border-bottom:1px solid #202226;vertical-align:top}td.m{font-family:var(--mono);white-space:nowrap}td:first-child{white-space:nowrap}
+tr.off td{color:#6b6964}
+.tw{max-height:480px;overflow:auto}
+.warn{color:var(--acc);font-size:12.5px;margin:0 0 8px}.err{color:var(--bad)}
+.paths{table-layout:fixed}.paths td{font:11.5px var(--mono);word-break:break-all}.paths input{font-size:11.5px}
+.pill{display:inline-block;font:11px var(--mono);padding:1px 6px;border-radius:4px;background:#25282c;color:var(--dim)}
+.ok{color:var(--ok)}.ty{cursor:pointer;user-select:none}#tb td:nth-child(3){word-break:break-word}.grid>div{min-width:0}.ty-music{color:#9db8e8}.ty-sfx{color:var(--acc)}.ty-voice{color:var(--ok)}.hid{display:none}
+.bar{height:6px;background:#0e0f11;border-radius:3px;overflow:hidden;margin:10px 0 6px}.bar i{display:block;height:100%;width:0;background:var(--acc);transition:width .3s}
+#msg{font-size:12px;color:var(--dim);min-height:17px}
+pre{white-space:pre-wrap;font:11px var(--mono);color:var(--dim);max-height:160px;overflow:auto;margin:8px 0 0}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <div><h1>Tupa_Zelena_<b>Vlada</b></h1>
+    <div class="sub">FCPXML → AAF для Nuendo, Pro Tools, Resolve, Logic, Premiere. Працює локально.</div></div>
+    <div style="display:flex;gap:8px;align-items:center"><span class="pill" id="ver" style="white-space:nowrap"></span><button class="ghost" id="upd">Оновити</button><button class="ghost" id="quit" title="Зупинити конвертер">Вимкнути</button></div>
+  </div>
+
+  <div id="updBox" class="card hid" style="margin-bottom:18px">
+    <h2>Оновлення</h2>
+    <div id="updTxt" style="font-size:13px"></div>
+    <ul id="updList" style="font-size:12.5px;color:var(--dim);margin:8px 0 12px;padding-left:18px"></ul>
+    <div style="display:flex;gap:8px"><button class="ghost" id="updGo" style="background:var(--acc);color:#1a1205;font-weight:650;border:0" hidden>Встановити оновлення</button><button class="ghost" id="updClose">Закрити</button></div>
+  </div>
+
+  <div id="drop"><b>Кинь сюди .fcpxml</b> або клікни, щоб вибрати<br><small>(для .fcpxmld — файл Info.fcpxml всередині пакета)</small><input id="fi" type="file" accept=".fcpxml,.xml" class="hid"></div>
+  <div id="err" class="err" style="margin-top:10px"></div>
+
+  <div id="main" class="grid hid">
+    <div>
+      <div class="card">
+        <h2>Експорт</h2>
+        <label class="opt"><input type="radio" name="mode" value="all" checked><span>Лишити як є<small>Вимкнені кліпи йдуть на окремі треки з позначкою OFF — замʼютиш їх одним кліком</small></span></label>
+        <label class="opt"><input type="radio" name="mode" value="nodis"><span>Викинути вимкнені<small>Тільки активні кліпи</small></span></label>
+        <label class="opt"><input type="checkbox" id="outside"><span>Викинути все поза хронометражем<small id="rangeHint"></small></span></label>
+        <div class="sep"></div>
+        <h2 style="margin-top:4px">Доріжки</h2>
+        <label class="opt"><input type="radio" name="layout" value="min" checked><span>Мінімум доріжок<small>Кліпи щільно, без накладань — зазвичай 2–3 доріжки</small></span></label>
+        <label class="opt"><input type="radio" name="layout" value="tidy"><span>Навести порядок<small>Голос / Музика / Шуми окремо, кожне на мінімум доріжок. Тип кліпу можна змінити кліком у таблиці</small></span></label>
+        <label class="opt"><input type="radio" name="layout" value="fcp"><span>Як у FCP<small>Лейн = доріжка</small></span></label>
+        <label class="opt" style="opacity:.45;cursor:default"><input type="checkbox" disabled><span>Гучність як автоматизація<small>Скоро. Зараз усі кліпи на 0 dB</small></span></label>
+        <div class="sep"></div>
+        <label class="opt"><input type="checkbox" id="cons" checked><span>Класти в AAF лише потрібні шматки аудіо<small>Якщо медіа є на цьому компʼютері, звук пакується всередину AAF. З галочкою — тільки ті частини треків, що стоять на таймлайні, плюс запас для підрізки. Без галочки — файли цілком.</small></span></label>
+        <div class="row2">
+          <div><label class="f">Запас, сек</label><input type="number" id="handles" value="2" min="0" step="0.5"></div>
+          <div><label class="f">Sample rate</label><input type="number" id="sr" value="48000" step="100"></div>
+        </div>
+        <label class="f">Куди зберегти</label>
+        <div style="display:flex;gap:6px"><input type="text" id="outdir" value=""><button class="ghost" id="pick" style="white-space:nowrap">Вибрати…</button></div>
+        <div class="sep"></div>
+        <button id="go" disabled>Конвертувати в AAF</button>
+        <div class="bar"><i id="bar"></i></div>
+        <div id="msg"></div>
+        <div id="res" class="hid" style="margin-top:8px"><div class="ok" id="resTxt" style="font-size:12.5px;margin-bottom:8px"></div><button class="ghost" id="reveal">Показати файл</button></div>
+        <pre id="log" class="hid"></pre>
+      </div>
+    </div>
+    <div>
+      <div class="card">
+        <div class="stats" id="stats"></div>
+        <div id="warns"></div>
+        <div class="tw"><table><thead><tr><th>Доріжка</th><th>Тип</th><th>Кліп</th><th>Старт</th><th>Довж.</th><th>dB у FCP</th></tr></thead><tbody id="tb"></tbody></table></div>
+      </div>
+      <div class="card" style="margin-top:18px">
+        <h2>Шляхи до медіа</h2>
+        <div style="font-size:12px;color:var(--dim);margin-bottom:8px">Якщо диск змонтований інакше або файли переїхали — поправ папку праворуч.</div>
+        <table class="paths"><thead><tr><th style="width:45%">З FCPXML</th><th>Де шукати</th></tr></thead><tbody id="pt"></tbody></table>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+(() => {
+  const $ = (s) => document.querySelector(s);
+  const esc = (s) => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const fmtDb = (d) => (d > 0 ? '+' : d < 0 ? '−' : '') + Math.abs(Math.round(d * 10) / 10) + ' dB';
+  const TYPES = {}; const TN = { voice: 'Голос', music: 'Музика', sfx: 'Шум' }; const NEXT = { voice: 'music', music: 'sfx', sfx: 'voice' };
+  let XML = null, lastPath = null, dirsBuilt = false, timer = null;
+  const drop = $('#drop'), fi = $('#fi');
+  drop.onclick = () => fi.click();
+  drop.ondragover = (e) => { e.preventDefault(); drop.classList.add('over'); };
+  drop.ondragleave = () => drop.classList.remove('over');
+  drop.ondrop = (e) => { e.preventDefault(); drop.classList.remove('over'); if (e.dataTransfer.files[0]) load(e.dataTransfer.files[0]); };
+  fi.onchange = () => fi.files[0] && load(fi.files[0]);
+
+  async function api(path, body) {
+    const r = await fetch(path, { method: body ? 'POST' : 'GET', headers: { 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
+    const j = await r.json(); if (!r.ok) throw new Error(j.error || r.status); return j;
+  }
+  function opts() {
+    return { mode: document.querySelector('[name=mode]:checked').value, outside: $('#outside').checked,
+      layout: document.querySelector('[name=layout]:checked').value, types: TYPES, consolidate: $('#cons').checked,
+      handles: parseFloat($('#handles').value) || 0, sampleRate: parseInt($('#sr').value, 10) || 48000, outdir: $('#outdir').value };
+  }
+  function pathmap() { const m = {}; document.querySelectorAll('#pt input').forEach(i => m[i.dataset.from] = i.value); return m; }
+
+  async function load(file) {
+    $('#err').textContent = ''; XML = await file.text(); dirsBuilt = false; for (const k in TYPES) delete TYPES[k]; $('#res').classList.add('hid'); $('#log').classList.add('hid');
+    await refresh();
+  }
+  async function refresh() {
+    if (!XML) return;
+    try {
+      const d = await api('/api/parse', { xml: XML, opts: opts(), pathmap: pathmap() });
+      if (!dirsBuilt) {
+        $('#pt').innerHTML = Object.entries(d.dirs).map(([k, n]) => `<tr><td>${esc(k)} <span class="pill">${n}</span></td><td><input type="text" data-from="${esc(k)}" value="${esc(k)}"></td></tr>`).join('');
+        document.querySelectorAll('#pt input').forEach(i => i.onchange = refresh); dirsBuilt = true;
+      }
+      $('#main').classList.remove('hid');
+      drop.innerHTML = `<b>${esc(d.name)}</b> — ${d.total} аудіокліпів. Кинь інший файл, щоб замінити.`; drop.appendChild(fi);
+      $('#rangeHint').textContent = d.range ? `Межі відео: ${d.range[0]} – ${d.range[1]}` : `Відео немає — межа = тривалість секвенції (${d.dur})`;
+      const nclips = d.tracks.reduce((s, t) => s + t.clips.length, 0);
+      $('#stats').innerHTML = `<span>Проєкт <b>${esc(d.name)}</b></span><span>fps <b>${d.fps}</b></span><span>Тривалість <b>${d.dur}</b></span><span>Кліпів <b>${nclips}</b>/${d.total}</span><span>Треків <b>${d.tracks.length}</b></span><span>Медіа знайдено <b>${d.nfiles - d.missing.length}</b>/${d.nfiles}</span>`;
+      const w = d.warnings.slice();
+      if (d.missing.length) w.unshift(`${d.missing.length} з ${d.nfiles} файлів немає на цьому компʼютері. Кліпи все одно стануть на свої місця, але як посилання на оригінальні файли — у Nuendo перелінкуєш (Media → Find Missing Files). Якщо медіа лежить в іншій папці — вкажи її нижче.`);
+      if (!d.converter && d.missing.length < d.nfiles) w.push('Немає afconvert/ffmpeg — mp3 не вшиються, підуть посиланнями.');
+      $('#warns').innerHTML = w.map(x => `<p class="warn" style="white-space:pre-line">⚠ ${esc(x)}</p>`).join('');
+      $('#tb').innerHTML = d.tracks.flatMap(t => t.clips.map(c => `<tr class="${c.enabled ? '' : 'off'}"><td>${esc(t.name)}</td><td><span class="pill ty ty-${c.type}" data-id="${c.id}" data-t="${c.type}" title="Клік — змінити тип">${TN[c.type]}</span></td><td>${esc(c.name)}${t.w == 1 ? ' <span class="pill">ch' + c.ch + '</span>' : ''}</td><td class="m">${c.tc}</td><td class="m">${c.dur.toFixed(2)}s</td><td class="m">${fmtDb(c.db)}</td></tr>`)).join('');
+      document.querySelectorAll('.ty').forEach(e => e.onclick = () => { TYPES[e.dataset.id] = NEXT[e.dataset.t]; refresh(); });
+      $('#go').disabled = !nclips;
+    } catch (e) { $('#err').textContent = 'Помилка: ' + e.message; }
+  }
+  document.querySelectorAll('input[name=mode],input[name=layout],#outside').forEach(i => i.onchange = refresh);
+
+  $('#go').onclick = async () => {
+    $('#go').disabled = true; $('#res').classList.add('hid'); $('#log').classList.add('hid'); $('#err').textContent = '';
+    try { await api('/api/convert', { xml: XML, opts: opts(), pathmap: pathmap() }); } catch (e) { $('#err').textContent = e.message; $('#go').disabled = false; return; }
+    clearInterval(timer);
+    timer = setInterval(async () => {
+      const s = await api('/api/progress');
+      $('#bar').style.width = Math.round((s.p || 0) * 100) + '%'; $('#msg').textContent = s.msg || '';
+      if (s.done) {
+        clearInterval(timer); $('#go').disabled = false;
+        const logTxt = (s.log || []).join('\n');
+        if (logTxt) { $('#log').textContent = logTxt; $('#log').classList.remove('hid'); }
+        if (s.error) { $('#err').textContent = 'Помилка: ' + s.error; return; }
+        lastPath = s.result.path;
+        $('#resTxt').textContent = `Готово: ${s.result.tracks} треків, ${s.result.clips} кліпів` + (s.result.embedded ? `, вшито ${s.result.embedded} файлів` : '') + (s.result.linked ? `, посиланнями ${s.result.linked}` : '') + ` → ${s.result.path}`;
+        $('#res').classList.remove('hid');
+      }
+    }, 400);
+  };
+  $('#pick').onclick = async () => { const r = await api('/api/pickdir', { initial: $('#outdir').value }); if (r.path) $('#outdir').value = r.path; };
+  const ping = async () => { try { const r = await api('/api/ping'); if (!$('#outdir').value) $('#outdir').value = r.outdir; } catch (e) {} };
+  ping(); setInterval(ping, 10000);
+  api('/api/info').then(r => $('#ver').textContent = 'версія ' + r.version).catch(() => {});
+  const ub = $('#updBox'), ut = $('#updTxt'), ul = $('#updList'), ug = $('#updGo');
+  $('#updClose').onclick = () => ub.classList.add('hid');
+  $('#upd').onclick = async () => {
+    ub.classList.remove('hid'); ug.hidden = true; ul.innerHTML = ''; ut.textContent = 'Перевіряю GitHub…';
+    try {
+      const r = await api('/api/update/check');
+      if (!r.ok) { ut.innerHTML = '<span class="err">' + esc(r.error) + '</span>'; return; }
+      if (!r.behind) { ut.innerHTML = '<span class="ok">У тебе найсвіжіша версія</span>' + (r.date ? ` (${esc(r.date)})` : ''); return; }
+      ut.textContent = r.firstTime ? 'Підключу програму до GitHub і підтягну актуальну версію.' : `Є нове: ${r.behind} змін${r.date ? ' · ' + r.date : ''}`;
+      ul.innerHTML = (r.changes || []).map(c => '<li>' + esc(c) + '</li>').join(''); ug.hidden = false;
+    } catch (e) { ut.innerHTML = '<span class="err">' + esc(e.message) + '</span>'; }
+  };
+  ug.onclick = async () => {
+    ug.hidden = true; ut.textContent = 'Встановлюю…';
+    try {
+      const r = await api('/api/update/apply', {});
+      if (!r.ok) { ut.innerHTML = '<span class="err">' + esc(r.error) + '</span>'; return; }
+      ut.textContent = 'Оновлено. Перезапускаю…' + (r.backup ? ' (твої старі файли — у ' + r.backup + ')' : '');
+      const t0 = Date.now();
+      await new Promise(res => setTimeout(res, 1200));
+      while (Date.now() - t0 < 40000) { try { await api('/api/info'); location.reload(); return; } catch (e) { await new Promise(res => setTimeout(res, 700)); } }
+      ut.innerHTML = '<span class="err">Не перезапустилось — відкрий програму ще раз з ярлика</span>';
+    } catch (e) { ut.innerHTML = '<span class="err">' + esc(e.message) + '</span>'; }
+  };
+  $('#reveal').onclick = () => lastPath && api('/api/reveal', { path: lastPath });
+  $('#quit').onclick = async () => { try { await api('/api/quit', {}); } catch (e) {} document.body.innerHTML = '<div class="wrap"><h1>Вимкнено</h1><div class="sub">Можна закрити вкладку.</div></div>'; };
+})();
+</script>
+</body>
+</html>

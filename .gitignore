@@ -1,0 +1,8 @@
+config.json
+app.log
+pythonw.txt
+.update-backup/
+__pycache__/
+*.pyc
+*.aaf
+.DS_Store

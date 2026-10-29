@@ -1,0 +1,9 @@
+#!/bin/bash
+export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
+cd "$(dirname "$0")/../../.."
+export FCPXML2AAF_APP=1
+if ! command -v python3 >/dev/null 2>&1; then
+  osascript -e 'display alert "Потрібен Python 3" message "Відкрий Термінал і виконай: xcode-select --install"'
+  exit 1
+fi
+exec python3 fcpxml2aaf.py
