@@ -541,6 +541,40 @@ def master_from_files(f, name, files, length, sr, real=True):
     return mm, ids
 
 
+def link_original(f, path, nch, length, sr):
+    """офлайн: посилання на ОРИГІНАЛЬНИЙ файл (ім'я й розширення як є — щоб Nuendo перелінкував з бібліотеки).
+    Один файл-моб з N каналами, як посилання на стерео-файл у Nuendo."""
+    fname = os.path.basename(path)
+    base = os.path.splitext(fname)[0]
+    sm = f.create.SourceMob()
+    sm.name = fname
+    for k in range(nch):
+        sl = sm.create_timeline_slot(sr)
+        sc = f.create.SourceClip(media_kind='sound')
+        sc.length = length
+        sl.segment = sc
+        sl['PhysicalTrackNumber'].value = k + 1
+    d = f.create.WAVEDescriptor()
+    d['SampleRate'].value = sr
+    d['Summary'].value = wav_summary(None, nch, sr)
+    d['Length'].value = length
+    d['ContainerFormat'].value = f.dictionary.lookup_containerdef('AAF')
+    loc = f.create.NetworkLocator()
+    loc['URLString'].value = to_url(path)
+    d['Locator'].append(loc)
+    sm.descriptor = d
+    f.content.mobs.append(sm)
+    mm = f.create.MasterMob(base)
+    f.content.mobs.append(mm)
+    ids = {}
+    for k, sl in enumerate(sm.slots):
+        ms = mm.create_timeline_slot(sr)
+        ms.segment = sm.create_source_clip(sl.slot_id, length=length, media_kind='sound')
+        ms['PhysicalTrackNumber'].value = k + 1
+        ids[k + 1] = ms.slot_id
+    return mm, ids
+
+
 def write_aaf(p, clips, out_path, opts, resolve, log, progress):
     sr = int(opts.get('sampleRate') or 48000)
     media_mode = opts.get('media', 'folder')
@@ -612,10 +646,8 @@ def write_aaf(p, clips, out_path, opts, resolve, log, progress):
                     masters[path].append((a0, m0, mm, ids))
             for path, (a, why) in linked.items():
                 n = int(round(a['duration'] * sr))
-                base = os.path.splitext(os.path.basename(path))[0]
-                wav = os.path.splitext(path)[0] + '.wav'   # Nuendo не бере посилання на mp3
                 nch = max(1, a['channels'] * max(1, a['sources']))
-                mm, ids = master_from_files(f, base, [(ch, wav) for ch in range(1, nch + 1)], n, sr, real=False)
+                mm, ids = link_original(f, path, nch, n, sr)
                 masters[path] = [(0, n, mm, ids)]
 
             comp = f.create.CompositionMob(p['name'])
