@@ -251,8 +251,9 @@ SFX_WORDS = ('swish', 'swoosh', 'whoosh', 'woosh', 'gleam', 'hit', 'boom', 'rise
              'reverse', 'sweep', 'braam', 'stinger', 'sfx', 'fx', 'transition', 'click', 'pop', 'glitch')
 TYPE_ORDER = {'music': 0, 'sfx': 1}
 TYPE_NAME = {'music': 'Music', 'sfx': 'SFX'}
-# бібліотечна музика: UPM_…, або каталожний код на початку (XCD737_01, XEH013_06, ATN074_01, LQC32_67…)
-LIB_MUSIC_RE = re.compile(r'(?:^|_)UPM_|^[A-Z]{2,6}\d{2,4}[A-Z]?_\d{1,3}(?:\b|_)', re.I)
+# бібліотечна музика: каталожний префікс на початку назви — великі літери + цифри + «_»
+# (Extreme: XCD737_, XEH013_, XDS…; Universal: UPM_…, BER1230A_; ATN074_ тощо) або UPM_ будь-де
+LIB_MUSIC_RE = re.compile(r'^[A-Z]{2,8}\d{2,6}[A-Z]?_|(?:^|[_\- ])UPM_')
 
 
 def classify(c):
